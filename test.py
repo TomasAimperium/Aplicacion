@@ -13,11 +13,12 @@ from pipeline import *
 import warnings
 from IPython.display import clear_output
 import config as c
+import glob
 
 
 f = c.FRANJA_HORARIA#"+00:00"
 s = c.SAMPLEO#15
-N = c.DATOS_TRAIN#100000
+N_data = c.DATOS_TRAIN#100000
 n_out = c.N_OUT#[2,20]
 sav = c.SAVGOL
 N = c.N
@@ -26,8 +27,19 @@ alarm = c.ALARM
 conv = c.CONV
 
 
+def load_historic():
+	f = open('data/historico.json')
+	js = json.load(f)
+	D = pd.DataFrame([json.loads(js['data']['values']),ast.literal_eval(js['data']['datetime'])]).T
+	return D.iloc[:N_data,:]
+	
 
-D = pd.read_csv('data/NCU_8.csv')
+def load_instance(i):
+	files = glob.glob("data/jsons/*")
+	f = open(files[i])
+	js = json.load(f)
+	return js
+
 
 
 def isnumeric(s):
@@ -55,11 +67,9 @@ def isdate(date_text):
 def error_pred():
 	val = []
 	for i in range(5):
-		
-		data = D.iloc[i:(200*2)+i,0:2].values
-		DATA = [data[:,1],data[:,0]]
+		DATA = load_instance(i)
 		inp = pipeline(DATA,sav = sav,N = N,n= n)
-		out = predictions(inp,conv=3.6,alarm = alarm, sam=s, N = N,n= n,ret = 1) 
+		out = predictions(inp,conv=conv,alarm = alarm, sam=s, N = N,n= n,ret = 1) 
 		print(i+1,float(out['output']['validation']['MAPEmax']))
 
 	val.append(float(out['output']['validation']['MAPEmax']))
@@ -67,24 +77,28 @@ def error_pred():
 
 
 def test_train():
-	assert len(D) > N
-	assert np.sum([isnumeric(s) for s in D.values[:,1]]) / len(D.values[:,1]) == 1
-	assert np.isnan(list(D.values[:,1])).sum() / len(D.values[:,1]) <= 0.85
-try:
-	fechas = [datetime.datetime.strptime(i, "%Y-%m-%d %H:%M:%S"+f) for i in D[:,0]]
-	assert np.mean(np.diff(fechas)).total_seconds() <= (s+5)
-except:
-	print("Tiempo de sampleo irregular")
+
+	D = load_historic()
+	assert len(D) == N_data
+
+
+	assert np.sum([isnumeric(s) for s in D.values[:,0]]) / len(D.values[:,0]) == 1
+	assert np.isnan(list(D.values[:,0])).sum() / len(D.values[:,0]) <= 0.85
+	try:
+		fechas = [datetime.datetime.strptime(i, "%Y-%m-%d %H:%M:%S"+f) for i in D.iloc[:,1]]
+		assert np.mean(np.diff(fechas)).total_seconds() <= (s+5)
+	except:
+		print("Tiempo de sampleo irregular")
 
 
 def test_format():
 	assert data.shape == (2*N,2)
-	assert np.sum([isnumeric(s) for s in data[:,1]]) / len(data[:,1]) == 1
-	assert np.sum([isstring(s) for s in data[:,0]]) / len(data[:,0]) == 1 
-	assert np.sum([isdate(s) for s in data[:,0]]) / len(data[:,0]) == 1 
+	assert np.sum([isnumeric(s) for s in data[:,0]]) / len(data[:,0]) == 1
+	assert np.sum([isstring(s) for s in data[:,1]]) / len(data[:,1]) == 1 
+	assert np.sum([isdate(s) for s in data[:,1]]) / len(data[:,1]) == 1 
 
 def test_nan():
-	assert np.isnan(list(data[:,1])).sum() / len(data[:,1]) <= 0.85
+	assert np.isnan(list(data[:,0])).sum() / len(data[:,0]) <= 0.85
 
 
 #def test_sample():
@@ -94,27 +108,25 @@ def test_nan():
 
 
 def test_prep():
-	DATA = [data[:,1],data[:,0]]
-	inp = pipeline(DATA,111)
+	DATA = load_instance(i)
+	inp = pipeline(DATA,sav = sav,N = N,n= n)
 	assert type(inp) == list
-	assert len(inp) == 8
+	assert len(inp) == 9
 	assert inp[0].shape == (1,N,1)
 	assert np.sum([isnumeric(s) for s in inp[0].reshape(-1)]) / len(inp[0].reshape(-1)) == 1
 	assert type(inp[1]) == float
-	assert inp[2].shape == (2*N,)
-	assert np.sum([isstring(s) for s in inp[2].reshape(-1)]) / len(inp[2].reshape(-1)) == 1 
-	assert np.sum([isdate(s) for s in inp[2].reshape(-1)]) / len(inp[2].reshape(-1)) == 1 	
+	assert len(inp[2])== 2*N
+	assert np.sum([isstring(s) for s in inp[2]]) / len(inp[2]) == 1 
+	assert np.sum([isdate(s) for s in inp[2]]) / len(inp[2]) == 1 	
 	assert type(inp[3]) == int
 	assert inp[4].shape == (1,N,1)
-	assert np.sum([isnumeric(s) for s in inp[4].reshape(-1)]) / len(inp[4].reshape(-1)) == 1
+	assert np.sum([isnumeric(s) for s in inp[4][0]]) / len(inp[4][0]) == 1
 
 def test_predict():
 
-	data = D.iloc[i:(N*2)+i,0:2].values
-	DATA = [data[:,1],data[:,0]]
+	DATA = load_instance(i)
 	inp = pipeline(DATA,sav = sav,N = N,n= n)
 	out = predictions(inp,conv=3.6,alarm = alarm, sam=s, N = N,n= n,ret = 1) 
-
 	assert type(out) == dict
 	assert len(json.loads(out['output']['ConfInt'])) == n_out[0]
 	assert type(json.loads(out['output']['Max'])) == float
@@ -134,8 +146,9 @@ def test_error():
 
 if __name__ == "__main__":
 
+	D = load_historic()	
 	nn = 10
-	ind = np.random.randint(0,len(D)-1000,nn)
+	ind = np.random.randint(0,1000,nn)
 
 ######################################################
 	print("#############################")
@@ -143,7 +156,7 @@ if __name__ == "__main__":
 	print("...")	
 	for i in range(nn):
 		
-		data = D.iloc[ind[i]:(ind[i]+2*N),0:2].values
+		data = D.iloc[ind[i]:(ind[i]+2*N),:].values
 		test_nan()
 	print("La completitud es adecuada")
 	print("")
@@ -154,7 +167,7 @@ if __name__ == "__main__":
 	print("...")
 	for i in range(nn):
 		
-		data = D.iloc[ind[i]:(ind[i]+2*N),0:2].values
+		data = D.iloc[ind[i]:(ind[i]+2*N),:].values
 		test_format()
 	print("El formato es adecuado")
 	print("")
@@ -166,7 +179,7 @@ if __name__ == "__main__":
 	print("Test de preprocesamiento")
 	print("...")
 	for i in range(nn):
-		data = D.iloc[ind[i]:(ind[i]+2*N),0:2].values
+		data = load_instance(ind[i])
 		test_prep()
 	print("El preprocesamiento es adecuado")
 	print("#############################")
@@ -181,7 +194,7 @@ if __name__ == "__main__":
 	for i in range(nn):		
 		print(i+1,"/",nn)
 		
-		data = D.iloc[ind[i]:(ind[i]+2*N),0:2].values
+		data = load_instance(ind[i])
 		test_predict()
 		
 
@@ -189,6 +202,7 @@ if __name__ == "__main__":
 ######################################################
 	print("#############################")
 	print("")
+	test_train()
 
 	try:
 		test_train()
@@ -216,7 +230,6 @@ if __name__ == "__main__":
 		print("El modelo debe ser entrenado")
 
 	print("#############################")
-
 
 
 
